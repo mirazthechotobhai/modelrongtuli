@@ -63,6 +63,7 @@ export const MainPageControlBar: React.FC<MainPageControlBarProps> = ({
   const [duration, setDuration] = useState<number>(0);
   const [volume, setVolume] = useState<number>(100);
   const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [customMinutes, setCustomMinutes] = useState<string>('');
   const [showServerMenu, setShowServerMenu] = useState<boolean>(false);
   const [tvMeta, setTvMeta] = useState<TvShowMetadata | null>(null);
   const [inputSeason, setInputSeason] = useState<number | string>(season);
@@ -140,7 +141,7 @@ export const MainPageControlBar: React.FC<MainPageControlBarProps> = ({
 
   // Dispatch player command to Firebase & BroadcastChannel
   const dispatchCommand = (
-    command: 'play' | 'pause' | 'seek' | 'volume' | 'mute' | 'unmute' | 'fullscreen' | 'stop',
+    command: 'play' | 'pause' | 'seek' | 'volume' | 'mute' | 'unmute' | 'fullscreen' | 'stop' | 'rewind' | 'forward',
     value?: any,
     extra?: any
   ) => {
@@ -250,9 +251,31 @@ export const MainPageControlBar: React.FC<MainPageControlBarProps> = ({
   // Rewind or Forward 10 seconds in real-time
   const handleSeekDelta = (deltaSeconds: number) => {
     soundFx.playClick('nav');
-    const target = Math.max(0, currentTime + deltaSeconds);
+    const isRewind = deltaSeconds < 0;
+    const absDelta = Math.abs(deltaSeconds);
+    let target = currentTime + deltaSeconds;
+    if (duration > 0) {
+      target = Math.min(duration, Math.max(0, target));
+    } else {
+      target = Math.max(0, target);
+    }
     setCurrentTime(target);
-    dispatchCommand('seek', target, deltaSeconds);
+    if (isRewind) {
+      dispatchCommand('rewind', target, -absDelta);
+    } else {
+      dispatchCommand('forward', target, absDelta);
+    }
+  };
+
+  const handleCustomMinutePlay = () => {
+    const mins = parseFloat(customMinutes);
+    if (isNaN(mins) || mins < 0) return;
+    soundFx.playClick('ok');
+    const target = mins * 60;
+    setCurrentTime(target);
+    setIsPlaying(true);
+    dispatchCommand('seek', target);
+    dispatchCommand('play');
   };
 
   // Stop playback on remote display in real-time
@@ -709,6 +732,45 @@ export const MainPageControlBar: React.FC<MainPageControlBarProps> = ({
 
         {/* Right: Volume Bar & Fullscreen */}
         <div className="flex items-center gap-1.5 sm:gap-2 order-3">
+          {/* Custom Minute Input Box with Play Icon (Before Volume Bar) */}
+          <div 
+            id="main-control-custom-minute-box"
+            className="flex items-center bg-zinc-900/90 border border-zinc-800 hover:border-zinc-700 rounded-xl px-2 py-1.5 gap-1 focus-within:border-amber-500/60 transition-colors shadow-inner"
+            title="Enter minutes to play directly"
+          >
+            <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-tight select-none">
+              Min:
+            </span>
+            <input
+              id="main-custom-minute-input"
+              type="number"
+              min={0}
+              step="any"
+              placeholder="0"
+              value={customMinutes}
+              onChange={(e) => setCustomMinutes(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleCustomMinutePlay();
+                }
+              }}
+              className="w-9 sm:w-11 text-center bg-transparent text-amber-400 text-xs font-mono font-bold outline-none placeholder:text-zinc-600 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              title="Enter minute (e.g. 5, 12, 45) and click play"
+            />
+            <button
+              id="main-custom-minute-play-btn"
+              type="button"
+              onClick={handleCustomMinutePlay}
+              disabled={!customMinutes.trim()}
+              className="p-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-black active:scale-90 transition-all cursor-pointer disabled:opacity-25 disabled:cursor-not-allowed shadow-sm shrink-0"
+              title="Play from this minute"
+              aria-label="Play from this minute"
+            >
+              <Play className="w-3 h-3 fill-black stroke-black translate-x-0.5" />
+            </button>
+          </div>
+
           <div className="flex items-center gap-1.5 sm:gap-2 bg-zinc-900/90 border border-zinc-800 rounded-xl px-2 sm:px-2.5 py-1.5 shadow-inner">
             <button 
               onClick={handleToggleMute} 

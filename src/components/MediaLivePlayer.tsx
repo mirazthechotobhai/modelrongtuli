@@ -25,6 +25,7 @@ import {
   Subtitles,
   Activity,
   ArrowRight,
+  ArrowLeft,
   Tv2
 } from 'lucide-react';
 import { MediaItem } from '../types';
@@ -38,6 +39,7 @@ import {
   formatEmbedMasterId,
   buildEmbedMasterQuery
 } from '../utils/servers';
+import { popupManager } from '../utils/popupManager';
 
 export type { PlayerServer, PlayerOptions };
 export { formatEmbedMasterId };
@@ -139,6 +141,7 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
   const [duration, setDuration] = useState<number>(0);
   const [volume, setVolume] = useState<number>(100);
   const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [customMinutes, setCustomMinutes] = useState<string>('');
   const [lastEvent, setLastEvent] = useState<string>('Ready');
   const [eventTime, setEventTime] = useState<number>(Date.now());
 
@@ -190,52 +193,280 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
     }
   }, [currentEpisode]);
 
-  // EMBEDMASTER POSTMESSAGE COMMAND DISPATCHER
-  const sendEmbedMasterCommand = useCallback((command: string, value?: any) => {
+  // EMBEDMASTER, PLAYERJS & KEYBOARD POSTMESSAGE COMMAND DISPATCHER
+  const sendEmbedMasterCommand = useCallback((command: string, value?: any, extra?: any) => {
     const frame = iframeRef.current || (document.getElementById('embedmaster_iframe') as HTMLIFrameElement | null);
     if (!frame || !frame.contentWindow) return;
 
     try {
-      frame.contentWindow.postMessage({
-        source: 'embedmaster_player_command',
-        command: command,
-        value: value
-      }, '*');
+      const cw = frame.contentWindow;
+
+      if (command === 'play') {
+        cw.postMessage('play', '*');
+        cw.postMessage({ api: 'play' }, '*');
+        cw.postMessage(JSON.stringify({ api: 'play' }), '*');
+        cw.postMessage('{"api":"play"}', '*');
+        cw.postMessage({ context: 'player.js', version: '0.0.11', method: 'play' }, '*');
+        cw.postMessage({ event: 'command', func: 'play', args: [] }, '*');
+        cw.postMessage({ action: 'play' }, '*');
+      } else if (command === 'pause') {
+        cw.postMessage('pause', '*');
+        cw.postMessage({ api: 'pause' }, '*');
+        cw.postMessage(JSON.stringify({ api: 'pause' }), '*');
+        cw.postMessage('{"api":"pause"}', '*');
+        cw.postMessage({ context: 'player.js', version: '0.0.11', method: 'pause' }, '*');
+        cw.postMessage({ event: 'command', func: 'pause', args: [] }, '*');
+        cw.postMessage({ action: 'pause' }, '*');
+      } else if (command === 'rewind' || command === 'forward') {
+        const isRewind = command === 'rewind';
+        const delta = typeof extra === 'number' ? extra : (isRewind ? -10 : 10);
+        const absDelta = Math.abs(delta);
+        const signStr = isRewind ? `-${absDelta}` : `+${absDelta}`;
+        const targetSec = typeof value === 'number' && !isNaN(value) ? Math.max(0, value) : undefined;
+
+        // 1. Relative PlayerJS delta seek via "+10" / "-10" string (PlayerJS built-in standard)
+        cw.postMessage({ api: 'seek', set: signStr }, '*');
+        cw.postMessage({ api: 'seek', val: signStr }, '*');
+        cw.postMessage({ api: 'seek', value: signStr }, '*');
+        cw.postMessage(JSON.stringify({ api: 'seek', set: signStr }), '*');
+        cw.postMessage(JSON.stringify({ api: 'seek', val: signStr }), '*');
+        cw.postMessage(JSON.stringify({ api: 'seek', value: signStr }), '*');
+        cw.postMessage(`seek:${signStr}`, '*');
+        cw.postMessage(`api:seek:${signStr}`, '*');
+        cw.postMessage(`{"api":"seek","set":"${signStr}"}`, '*');
+        cw.postMessage(`{"api":"seek","val":"${signStr}"}`, '*');
+
+        // 2. Relative rewind / forward command names
+        const deltaCmd = isRewind ? 'rewind' : 'forward';
+        cw.postMessage({ api: deltaCmd, set: absDelta }, '*');
+        cw.postMessage({ api: deltaCmd, val: absDelta }, '*');
+        cw.postMessage({ api: deltaCmd, value: absDelta }, '*');
+        cw.postMessage(JSON.stringify({ api: deltaCmd, set: absDelta }), '*');
+        cw.postMessage(`${deltaCmd}:${absDelta}`, '*');
+        cw.postMessage(`api:${deltaCmd}:${absDelta}`, '*');
+        cw.postMessage({ action: deltaCmd, delta }, '*');
+        cw.postMessage({ type: deltaCmd, delta }, '*');
+
+        // 3. Absolute seek to calculated target time
+        if (typeof targetSec === 'number') {
+          cw.postMessage({ api: 'seek', set: targetSec }, '*');
+          cw.postMessage({ api: 'seek', val: targetSec }, '*');
+          cw.postMessage({ api: 'seek', value: targetSec }, '*');
+          cw.postMessage({ api: 'time', set: targetSec }, '*');
+          cw.postMessage(JSON.stringify({ api: 'seek', set: targetSec }), '*');
+          cw.postMessage(JSON.stringify({ api: 'seek', val: targetSec }), '*');
+          cw.postMessage(JSON.stringify({ api: 'seek', value: targetSec }), '*');
+          cw.postMessage(`seek:${targetSec}`, '*');
+          cw.postMessage(`api:seek:${targetSec}`, '*');
+          cw.postMessage({ context: 'player.js', version: '0.0.11', method: 'setCurrentTime', value: targetSec }, '*');
+          cw.postMessage({ context: 'player.js', version: '0.0.11', method: 'setCurrentTime', arg: targetSec }, '*');
+          cw.postMessage({ context: 'player.js', method: 'seek', value: targetSec }, '*');
+          cw.postMessage({ context: 'player.js', method: 'seek', arg: targetSec }, '*');
+          cw.postMessage(JSON.stringify({ context: 'player.js', version: '0.0.11', method: 'setCurrentTime', value: targetSec }), '*');
+          cw.postMessage({ event: 'command', func: 'seek', args: [targetSec] }, '*');
+          cw.postMessage({ action: 'seek', time: targetSec }, '*');
+          cw.postMessage({ action: 'seek', value: targetSec }, '*');
+          cw.postMessage({ type: 'seek', time: targetSec }, '*');
+          cw.postMessage({ type: 'seek', value: targetSec }, '*');
+          cw.postMessage({ type: 'seek', payload: targetSec }, '*');
+          cw.postMessage({ method: 'seek', args: [targetSec] }, '*');
+          cw.postMessage({ method: 'setCurrentTime', args: [targetSec] }, '*');
+        }
+
+        // 4. Keyboard simulation (ArrowLeft / ArrowRight, j / l)
+        const keyCode = isRewind ? 37 : 39;
+        const key = isRewind ? 'ArrowLeft' : 'ArrowRight';
+        const letterKey = isRewind ? 'j' : 'l';
+        const letterCode = isRewind ? 74 : 76;
+        cw.postMessage({ type: 'keydown', key, code: key, keyCode, which: keyCode }, '*');
+        cw.postMessage({ event: 'keydown', key, code: key, keyCode, which: keyCode }, '*');
+        cw.postMessage({ type: 'keydown', key: letterKey, code: `Key${letterKey.toUpperCase()}`, keyCode: letterCode, which: letterCode }, '*');
+        cw.postMessage({ event: 'keydown', key: letterKey, code: `Key${letterKey.toUpperCase()}`, keyCode: letterCode, which: letterCode }, '*');
+
+        // 5. EmbedMaster protocol
+        cw.postMessage({
+          source: 'embedmaster_player_command',
+          command,
+          value: targetSec !== undefined ? targetSec : absDelta,
+          extra: delta,
+        }, '*');
+
+        // 6. Focus iframe
+        try {
+          frame.focus?.();
+        } catch (_) {}
+      } else if (command === 'seek') {
+        const target = typeof value === 'number' && !isNaN(value)
+          ? Math.max(0, value)
+          : typeof extra === 'number'
+            ? Math.max(0, currentTimeRef.current + extra)
+            : 0;
+        currentTimeRef.current = target;
+        cw.postMessage({ api: 'seek', set: target }, '*');
+        cw.postMessage({ api: 'seek', val: target }, '*');
+        cw.postMessage({ api: 'seek', value: target }, '*');
+        cw.postMessage({ api: 'time', set: target }, '*');
+        cw.postMessage(JSON.stringify({ api: 'seek', set: target }), '*');
+        cw.postMessage(JSON.stringify({ api: 'seek', val: target }), '*');
+        cw.postMessage(JSON.stringify({ api: 'seek', value: target }), '*');
+        cw.postMessage(`seek:${target}`, '*');
+        cw.postMessage(`time:${target}`, '*');
+        cw.postMessage(`api:seek:${target}`, '*');
+
+        if (typeof extra === 'number') {
+          const delta = extra;
+          const deltaCmd = delta > 0 ? 'forward' : 'rewind';
+          const absVal = Math.abs(delta);
+          const signStr = delta > 0 ? `+${absVal}` : `-${absVal}`;
+          cw.postMessage({ api: 'seek', set: signStr }, '*');
+          cw.postMessage(JSON.stringify({ api: 'seek', set: signStr }), '*');
+          cw.postMessage(`seek:${signStr}`, '*');
+          cw.postMessage({ api: deltaCmd, set: absVal }, '*');
+          cw.postMessage(JSON.stringify({ api: deltaCmd, set: absVal }), '*');
+          cw.postMessage(`${deltaCmd}:${absVal}`, '*');
+        }
+
+        cw.postMessage({ context: 'player.js', version: '0.0.11', method: 'setCurrentTime', value: target }, '*');
+        cw.postMessage({ context: 'player.js', version: '0.0.11', method: 'setCurrentTime', arg: target }, '*');
+        cw.postMessage({ context: 'player.js', method: 'seek', value: target }, '*');
+        cw.postMessage({ context: 'player.js', method: 'seek', arg: target }, '*');
+        cw.postMessage(JSON.stringify({ context: 'player.js', version: '0.0.11', method: 'setCurrentTime', value: target }), '*');
+        cw.postMessage({ event: 'command', func: 'seek', args: [target] }, '*');
+        cw.postMessage({ action: 'seek', time: target }, '*');
+        cw.postMessage({ action: 'seek', value: target }, '*');
+        cw.postMessage({ type: 'seek', time: target }, '*');
+        cw.postMessage({ type: 'seek', value: target }, '*');
+        cw.postMessage({
+          source: 'embedmaster_player_command',
+          command: 'seek',
+          value: target,
+          extra,
+        }, '*');
+      } else if (command === 'volume') {
+        const vol = Number(value);
+        cw.postMessage({ api: 'volume', set: vol / 100 }, '*');
+        cw.postMessage(JSON.stringify({ api: 'volume', set: vol / 100 }), '*');
+        cw.postMessage({ context: 'player.js', version: '0.0.11', method: 'setVolume', value: vol / 100 }, '*');
+        cw.postMessage({
+          source: 'embedmaster_player_command',
+          command: 'volume',
+          value: vol,
+        }, '*');
+      } else if (command === 'mute' || command === 'unmute') {
+        cw.postMessage(command, '*');
+        cw.postMessage({ api: command }, '*');
+        cw.postMessage(JSON.stringify({ api: command }), '*');
+        cw.postMessage({ context: 'player.js', version: '0.0.11', method: command }, '*');
+        cw.postMessage({
+          source: 'embedmaster_player_command',
+          command: command,
+        }, '*');
+      } else {
+        cw.postMessage({
+          source: 'embedmaster_player_command',
+          command: command,
+          value: value,
+          extra: extra,
+        }, '*');
+      }
     } catch (err) {
       console.warn('[EmbedMaster] sendCommand error:', err);
     }
   }, []);
 
-  // Listen to EmbedMaster events coming from the iframe
+  // Listen to EmbedMaster and PlayerJS events coming from the iframe
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
-      const data = event.data;
-      if (!data || data.source !== 'embedmaster_player') return;
+      let data = event.data;
+      if (!data) return;
 
-      setLastEvent(data.event || 'message');
+      // Handle raw string events from PlayerJS like "play", "pause", "time:12.3", "duration:540"
+      if (typeof data === 'string') {
+        const trimmed = data.trim();
+        if (trimmed === 'play') {
+          setIsPlaying(true);
+        } else if (trimmed === 'pause') {
+          setIsPlaying(false);
+        } else if (trimmed.startsWith('time:')) {
+          const t = parseFloat(trimmed.substring(5));
+          if (!isNaN(t) && t >= 0) setCurrentTime(t);
+        } else if (trimmed.startsWith('duration:')) {
+          const d = parseFloat(trimmed.substring(9));
+          if (!isNaN(d) && d > 0) setDuration(d);
+        } else {
+          try {
+            data = JSON.parse(trimmed);
+          } catch (_) {
+            return;
+          }
+        }
+      }
+
+      setLastEvent((typeof data === 'object' && data?.event) || 'message');
       setEventTime(Date.now());
 
       let currentPlayingState = isPlayingRef.current;
 
-      if (data.event === 'play') {
-        setIsPlaying(true);
-        currentPlayingState = true;
-      } else if (data.event === 'pause') {
-        setIsPlaying(false);
-        currentPlayingState = false;
-      } else if (data.event === 'time' && data.info) {
-        if (typeof data.info.time === 'number') {
-          setCurrentTime(data.info.time);
-        }
-        if (typeof data.info.duration === 'number' && data.info.duration > 0) {
-          setDuration(data.info.duration);
-        }
-      } else if (data.event === 'volume' && data.info) {
-        if (typeof data.info.volume === 'number') {
-          setVolume(data.info.volume);
-        }
-        if (typeof data.info.muted === 'boolean') {
-          setIsMuted(data.info.muted);
+      if (typeof data === 'object' && data !== null) {
+        if (data.source === 'embedmaster_player') {
+          if (data.event === 'play') {
+            setIsPlaying(true);
+            currentPlayingState = true;
+          } else if (data.event === 'pause') {
+            setIsPlaying(false);
+            currentPlayingState = false;
+          } else if (data.event === 'time' && data.info) {
+            if (typeof data.info.time === 'number') {
+              setCurrentTime(data.info.time);
+            }
+            if (typeof data.info.duration === 'number' && data.info.duration > 0) {
+              setDuration(data.info.duration);
+            }
+          } else if (data.event === 'volume' && data.info) {
+            if (typeof data.info.volume === 'number') {
+              setVolume(data.info.volume);
+            }
+            if (typeof data.info.muted === 'boolean') {
+              setIsMuted(data.info.muted);
+            }
+          }
+        } else if (data.event) {
+          if (data.event === 'play') {
+            setIsPlaying(true);
+            currentPlayingState = true;
+          } else if (data.event === 'pause') {
+            setIsPlaying(false);
+            currentPlayingState = false;
+          }
+          if (data.event === 'time') {
+            const t = typeof data.answer === 'number' ? data.answer : typeof data.val === 'number' ? data.val : typeof data.value === 'number' ? data.value : typeof data.time === 'number' ? data.time : null;
+            if (t !== null && !isNaN(t) && t >= 0) setCurrentTime(t);
+          } else if (data.event === 'duration') {
+            const d = typeof data.answer === 'number' ? data.answer : typeof data.val === 'number' ? data.val : typeof data.value === 'number' ? data.value : typeof data.duration === 'number' ? data.duration : null;
+            if (d !== null && !isNaN(d) && d > 0) setDuration(d);
+          } else {
+            if (typeof data.time === 'number') setCurrentTime(data.time);
+            if (typeof data.duration === 'number' && data.duration > 0) setDuration(data.duration);
+            if (typeof data.data?.seconds === 'number') setCurrentTime(data.data.seconds);
+            if (typeof data.data?.duration === 'number' && data.data.duration > 0) setDuration(data.data.duration);
+          }
+        } else if (data.api) {
+          if (data.api === 'play') {
+            setIsPlaying(true);
+            currentPlayingState = true;
+          } else if (data.api === 'pause') {
+            setIsPlaying(false);
+            currentPlayingState = false;
+          }
+          if (data.api === 'time') {
+            const t = typeof data.answer === 'number' ? data.answer : typeof data.val === 'number' ? data.val : typeof data.value === 'number' ? data.value : typeof data.set === 'number' ? data.set : null;
+            if (t !== null && !isNaN(t) && t >= 0) setCurrentTime(t);
+          } else if (data.api === 'duration') {
+            const d = typeof data.answer === 'number' ? data.answer : typeof data.val === 'number' ? data.val : typeof data.value === 'number' ? data.value : typeof data.set === 'number' ? data.set : null;
+            if (d !== null && !isNaN(d) && d > 0) setDuration(d);
+          } else if (typeof data.set === 'number') {
+            setCurrentTime(data.set);
+          }
         }
       }
 
@@ -261,6 +492,31 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
+  // Continuous local playback ticker when video is playing to keep currentTime moving
+  useEffect(() => {
+    if (!isPlaying) return;
+    const interval = setInterval(() => {
+      // Query player iframe for precise time
+      const frame = iframeRef.current;
+      if (frame?.contentWindow) {
+        try {
+          frame.contentWindow.postMessage({ api: 'time' }, '*');
+          frame.contentWindow.postMessage(JSON.stringify({ api: 'time' }), '*');
+          frame.contentWindow.postMessage('time', '*');
+          frame.contentWindow.postMessage({ api: 'duration' }, '*');
+          frame.contentWindow.postMessage(JSON.stringify({ api: 'duration' }), '*');
+          frame.contentWindow.postMessage('duration', '*');
+        } catch (_) {}
+      }
+
+      setCurrentTime((prev) => {
+        if (durationRef.current > 0 && prev >= durationRef.current) return prev;
+        return prev + 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isPlaying]);
+
   const handlePrevEpisode = () => {
     setActiveEpisode((prev) => {
       if (prev <= 1) return 1;
@@ -280,6 +536,58 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
       setIsIframeLoading(true);
       onPlayerConfigChange?.({ serverIndex, season: activeSeason, episode: newEp });
       return newEp;
+    });
+  };
+
+  // Seek relative (-10s / +10s)
+  const handleSeek = useCallback((deltaSeconds: number) => {
+    soundFx.playClick('nav');
+    const isRewind = deltaSeconds < 0;
+    const absDelta = Math.abs(deltaSeconds);
+
+    const curr = currentTimeRef.current;
+    const dur = durationRef.current;
+    let target = curr + deltaSeconds;
+    if (dur > 0) {
+      target = Math.min(dur, Math.max(0, target));
+    } else {
+      target = Math.max(0, target);
+    }
+
+    currentTimeRef.current = target;
+    setCurrentTime(target);
+
+    if (isRewind) {
+      sendEmbedMasterCommand('rewind', target, -absDelta);
+    } else {
+      sendEmbedMasterCommand('forward', target, absDelta);
+    }
+  }, [sendEmbedMasterCommand]);
+
+  // Play directly from user-entered custom minutes
+  const handleCustomMinutePlay = () => {
+    const mins = parseFloat(customMinutes);
+    if (isNaN(mins) || mins < 0) return;
+    soundFx.playClick('ok');
+    const targetSeconds = mins * 60;
+
+    currentTimeRef.current = targetSeconds;
+    setCurrentTime(targetSeconds);
+    setIsPlaying(true);
+
+    sendEmbedMasterCommand('seek', targetSeconds);
+    sendEmbedMasterCommand('play');
+
+    syncManager.broadcast({
+      type: 'PLAYER_COMMAND',
+      command: 'seek',
+      value: targetSeconds,
+      timestamp: Date.now(),
+    });
+    syncManager.broadcast({
+      type: 'PLAYER_COMMAND',
+      command: 'play',
+      timestamp: Date.now(),
     });
   };
 
@@ -318,12 +626,14 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
           handlePrevEpisode();
         } else if (command === 'next_ep') {
           handleNextEpisode();
+        } else if (command === 'back' || command === 'close_tab' || command === 'close_popups') {
+          popupManager.closeAllOpenedTabs();
         }
       }
     });
 
     return () => unsubscribe();
-  }, [sendEmbedMasterCommand]);
+  }, [sendEmbedMasterCommand, handleSeek]);
 
   // Screen Wake Lock API and Background Sleep Prevention
   useEffect(() => {
@@ -414,21 +724,6 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
       sendEmbedMasterCommand('play');
       setIsPlaying(true);
     }
-  };
-
-  // Seek relative (-10s / +10s)
-  const handleSeek = (deltaSeconds: number) => {
-    soundFx.playClick('nav');
-    const target = Math.max(0, currentTime + deltaSeconds);
-    setCurrentTime(target);
-    sendEmbedMasterCommand('seek', target);
-  };
-
-  // Scrubber change
-  const handleScrubberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const target = Number(e.target.value);
-    setCurrentTime(target);
-    sendEmbedMasterCommand('seek', target);
   };
 
   // Volume & Mute
@@ -924,31 +1219,20 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
               : 'aspect-video rounded-2xl sm:rounded-3xl'
           }`}
         >
-          {/* Loading spinner while iframe connects */}
-          {isIframeLoading && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-zinc-950/95 backdrop-blur-sm pointer-events-none">
-              <div className="relative">
-                <div className="w-14 h-14 rounded-full border-2 border-amber-500/20 border-t-amber-400 animate-spin" />
-                <Play className="w-6 h-6 text-amber-400 absolute inset-0 m-auto" />
-              </div>
-              <span className="text-xs font-mono text-zinc-400">
-                Loading {item.title} on {currentServer.name}...
-              </span>
-            </div>
-          )}
-
-          {/* The EmbedMaster iframe: 100% width, 100% height, full screen player */}
+          {/* The EmbedMaster iframe: 100% width, 100% height, direct touch & click enabled with ZERO shield */}
           <iframe
             id="embedmaster_iframe"
             ref={iframeRef}
             key={`${playerUrl}-${activeSeason}-${activeEpisode}`}
             src={playerUrl}
             title={`${item.title} EmbedMaster Player`}
-            className="w-full h-full border-0 absolute inset-0 block"
-            allow="autoplay *; fullscreen *; picture-in-picture *; encrypted-media *"
+            className="w-full h-full border-0 absolute inset-0 block pointer-events-auto"
+            style={{
+              pointerEvents: 'auto',
+            }}
+            allow="autoplay *; fullscreen *; picture-in-picture *; encrypted-media *; accelerometer *; gyroscope *"
             allowFullScreen
             referrerPolicy="origin"
-            onLoad={() => setIsIframeLoading(false)}
           />
         </div>
       )}
@@ -960,32 +1244,6 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
           isLocked ? 'opacity-30 pointer-events-none' : ''
         }`}
       >
-        {/* TIMELINE PROGRESS SCRUBBER ROW */}
-        <div className="w-full flex items-center gap-2.5 sm:gap-4">
-          <span className="text-[11px] sm:text-xs font-mono font-bold text-amber-400 shrink-0 min-w-[42px]">
-            {formatTime(currentTime)}
-          </span>
-
-          {/* Interactive Scrub Bar */}
-          <div className="relative flex-1 flex items-center group py-1">
-            <input
-              id="embedmaster-scrub-slider"
-              type="range"
-              min={0}
-              max={duration > 0 ? duration : 100}
-              step={1}
-              value={currentTime}
-              onChange={handleScrubberChange}
-              className="w-full h-2 rounded-lg bg-zinc-800 accent-amber-400 hover:accent-amber-300 cursor-pointer appearance-none focus:outline-none transition-all"
-              title="Click or drag to seek"
-            />
-          </div>
-
-          <span className="text-[11px] sm:text-xs font-mono text-zinc-400 shrink-0 min-w-[42px] text-right">
-            {formatTime(duration)}
-          </span>
-        </div>
-
         {/* MAIN CONTROLS ROW */}
         <div className="w-full flex flex-wrap items-center justify-between gap-2.5">
           {/* Left: Playback Controls (Play/Pause, Rewind, Fast Forward) */}
@@ -1037,6 +1295,45 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
             >
               <span className="hidden sm:inline">+10s</span>
               <RotateCw className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
+            </button>
+          </div>
+
+          {/* Custom Minute Input Box with Play Icon (Before Volume Bar) */}
+          <div 
+            id="player-control-custom-minute-box"
+            className="flex items-center bg-zinc-900/90 border border-zinc-800 hover:border-zinc-700 rounded-2xl px-2 sm:px-2.5 py-1.5 gap-1 sm:gap-1.5 focus-within:border-amber-500/60 shadow-sm transition-all"
+            title="Enter minutes to jump directly and play"
+          >
+            <span className="text-[10px] sm:text-xs font-mono font-bold text-zinc-400 uppercase tracking-tight pl-0.5 select-none">
+              Min:
+            </span>
+            <input
+              id="input-custom-minute-seek"
+              type="number"
+              min={0}
+              step="any"
+              placeholder="0"
+              value={customMinutes}
+              onChange={(e) => setCustomMinutes(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleCustomMinutePlay();
+                }
+              }}
+              className="w-10 sm:w-12 text-center bg-transparent text-amber-400 text-xs sm:text-sm font-mono font-bold outline-none placeholder:text-zinc-600 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              title="Enter minute (e.g. 5, 12, 45) and click play"
+            />
+            <button
+              id="btn-custom-minute-play"
+              type="button"
+              onClick={handleCustomMinutePlay}
+              disabled={!customMinutes.trim()}
+              className="p-1 sm:p-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black active:scale-90 transition-all cursor-pointer disabled:opacity-25 disabled:cursor-not-allowed shadow-sm shrink-0"
+              title="Play from this minute"
+              aria-label="Play from entered minute"
+            >
+              <Play className="w-3 h-3 sm:w-3.5 sm:h-3.5 fill-black stroke-black translate-x-0.5" />
             </button>
           </div>
 
@@ -1179,6 +1476,21 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
               </div>
             )}
 
+            {/* Back / Close Opened Tab Button */}
+            <button
+              id="player-control-back-tab-btn"
+              type="button"
+              onClick={() => {
+                soundFx.playClick('switch');
+                popupManager.closeAllOpenedTabs();
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 hover:text-amber-400 border border-zinc-700 text-xs font-bold cursor-pointer transition-all active:scale-95 shadow-sm"
+              title="Back / Close Ad Tab without reloading player"
+            >
+              <ArrowLeft className="w-4 h-4 text-amber-400" />
+              <span className="hidden sm:inline">Back</span>
+            </button>
+
             {/* Fullscreen Button */}
             <button
               id="player-control-fullscreen-btn"
@@ -1190,29 +1502,6 @@ export const MediaLivePlayer: React.FC<MediaLivePlayerProps> = ({
               <Maximize2 className="w-4 h-4 text-amber-400" />
               <span className="hidden sm:inline">Fullscreen</span>
             </button>
-          </div>
-        </div>
-
-        {/* BOTTOM HUD STATUS BAR (EmbedMaster Connection Indicator) */}
-        <div className="flex items-center justify-between pt-2 border-t border-zinc-900 text-xs text-zinc-500 font-mono">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-zinc-300 font-sans font-semibold">
-              EmbedMaster Player Active
-            </span>
-            <span className="text-zinc-600">|</span>
-            <span className="text-zinc-400 hidden sm:inline">
-              Event: <strong className="text-amber-400">{lastEvent}</strong>
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-zinc-500 text-[11px] hidden sm:inline">
-              External Controls via Remote & Deck
-            </span>
-            <span className="text-amber-500/80 bg-amber-500/10 px-2 py-0.5 rounded text-[10px]">
-              PostMessage Connected
-            </span>
           </div>
         </div>
       </div>
